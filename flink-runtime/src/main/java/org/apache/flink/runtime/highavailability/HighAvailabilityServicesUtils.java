@@ -26,6 +26,7 @@ import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.runtime.blob.BlobStoreService;
 import org.apache.flink.runtime.blob.BlobUtils;
 import org.apache.flink.runtime.dispatcher.Dispatcher;
+import org.apache.flink.runtime.highavailability.kubernetes.KubernetesHaServices;
 import org.apache.flink.runtime.highavailability.nonha.embedded.EmbeddedHaServices;
 import org.apache.flink.runtime.highavailability.nonha.standalone.StandaloneHaServices;
 import org.apache.flink.runtime.highavailability.zookeeper.ZooKeeperHaServices;
@@ -34,6 +35,7 @@ import org.apache.flink.runtime.jobmaster.JobMaster;
 import org.apache.flink.runtime.net.SSLUtils;
 import org.apache.flink.runtime.resourcemanager.ResourceManager;
 import org.apache.flink.runtime.rpc.akka.AkkaRpcServiceUtils;
+import org.apache.flink.runtime.util.KubernetesUtils;
 import org.apache.flink.runtime.util.ZooKeeperUtils;
 import org.apache.flink.util.ConfigurationException;
 import org.apache.flink.util.FlinkException;
@@ -58,13 +60,22 @@ public class HighAvailabilityServicesUtils {
 				return new EmbeddedHaServices(executor);
 
 			case ZOOKEEPER:
+			case KUBERNETES:
 				BlobStoreService blobStoreService = BlobUtils.createBlobStoreFromConfig(config);
 
-				return new ZooKeeperHaServices(
-					ZooKeeperUtils.startCuratorFramework(config),
-					executor,
-					config,
-					blobStoreService);
+				if (highAvailabilityMode.equals(HighAvailabilityMode.ZOOKEEPER)) {
+					return new ZooKeeperHaServices(
+						ZooKeeperUtils.startCuratorFramework(config),
+						executor,
+						config,
+						blobStoreService);
+				} else {
+					return new KubernetesHaServices(
+						KubernetesUtils.createKubernetesApiContext(config),
+						executor,
+						config,
+						blobStoreService);
+				}
 
 			case FACTORY_CLASS:
 				return createCustomHAServices(config, executor);
@@ -117,13 +128,22 @@ public class HighAvailabilityServicesUtils {
 					jobManagerRpcUrl,
 					String.format("%s%s:%s", protocol, address, port));
 			case ZOOKEEPER:
+			case KUBERNETES:
 				BlobStoreService blobStoreService = BlobUtils.createBlobStoreFromConfig(configuration);
 
-				return new ZooKeeperHaServices(
-					ZooKeeperUtils.startCuratorFramework(configuration),
-					executor,
-					configuration,
-					blobStoreService);
+				if (highAvailabilityMode.equals(HighAvailabilityMode.ZOOKEEPER)) {
+					return new ZooKeeperHaServices(
+						ZooKeeperUtils.startCuratorFramework(configuration),
+						executor,
+						configuration,
+						blobStoreService);
+				} else {
+					return new KubernetesHaServices(
+						KubernetesUtils.createKubernetesApiContext(configuration),
+						executor,
+						configuration,
+						blobStoreService);
+				}
 
 			case FACTORY_CLASS:
 				return createCustomHAServices(configuration, executor);

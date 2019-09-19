@@ -18,12 +18,17 @@
 
 package org.apache.flink.runtime.checkpoint;
 
-import org.apache.curator.framework.CuratorFramework;
 import org.apache.flink.runtime.jobgraph.JobStatus;
+import org.apache.flink.runtime.kubernetes.KubernetesApiContext;
+import org.apache.flink.runtime.kubernetes.KubernetesTestUtils;
+import org.apache.flink.runtime.util.KubernetesUtils;
 import org.apache.flink.runtime.zookeeper.ZooKeeperTestEnvironment;
 import org.apache.flink.util.TestLogger;
+
+import org.apache.curator.framework.CuratorFramework;
 import org.junit.AfterClass;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -39,6 +44,7 @@ import java.util.concurrent.Future;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
+import static org.junit.Assume.assumeTrue;
 
 public abstract class CheckpointIDCounterTest extends TestLogger {
 
@@ -100,6 +106,68 @@ public abstract class CheckpointIDCounterTest extends TestLogger {
 		protected CheckpointIDCounter createCompletedCheckpoints() throws Exception {
 			return new ZooKeeperCheckpointIDCounter(ZooKeeper.getClient(),
 					"/checkpoint-id-counter");
+		}
+	}
+
+	public static class KubernetesCheckpointIDCounterTest extends CheckpointIDCounterTest {
+
+		private static KubernetesApiContext apiContext;
+
+		@BeforeClass
+		public static void beforeClass() throws Exception {
+			Boolean isKubernetesAvailable = KubernetesTestUtils.isKubernetesAvailable();
+			assumeTrue("Kubernetes environment is not available", isKubernetesAvailable);
+			if (isKubernetesAvailable) {
+				apiContext = KubernetesTestUtils.createApiContext();
+			}
+		}
+
+		@AfterClass
+		public static void afterClass() {
+			if (apiContext != null) {
+				KubernetesTestUtils.clearEnvironment(apiContext);
+				apiContext = null;
+			}
+		}
+
+		@Before
+		public void before() {
+			if (apiContext != null) {
+				KubernetesTestUtils.deleteAllConfigMaps(apiContext);
+			}
+		}
+
+		@Override
+		protected CheckpointIDCounter createCompletedCheckpoints() throws Exception {
+			return new KubernetesCheckpointIDCounter(apiContext, "checkpoint-id-counter");
+		}
+
+		/**
+		 * Tests that counter node is removed from ZooKeeper after shutdown.
+		 */
+		@Test
+		public void testShutdownRemovesState() throws Exception {
+			CheckpointIDCounter counter = createCompletedCheckpoints();
+			counter.start();
+
+			assertNotNull(KubernetesUtils.getConfigMap(apiContext, "checkpoint-id-counter"));
+
+			counter.shutdown(JobStatus.FINISHED);
+			assertNull(KubernetesUtils.getConfigMap(apiContext, "checkpoint-id-counter"));
+		}
+
+		/**
+		 * Tests that counter node is NOT removed from ZooKeeper after suspend.
+		 */
+		@Test
+		public void testSuspendKeepsState() throws Exception {
+			CheckpointIDCounter counter = createCompletedCheckpoints();
+			counter.start();
+
+			assertNotNull(KubernetesUtils.getConfigMap(apiContext, "checkpoint-id-counter"));
+
+			counter.shutdown(JobStatus.SUSPENDED);
+			assertNotNull(KubernetesUtils.getConfigMap(apiContext, "checkpoint-id-counter"));
 		}
 	}
 
